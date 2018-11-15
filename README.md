@@ -43,53 +43,54 @@ const Moleculer = require("serverless-moleculer");
 
 module.exports = Moleculer({
     settings: {
-		json: true, // Do you want the event.body to be parsed? By default, it's a string
-		service: {
-			log: false, // Do you want all logs of the the lib? Set false in prod plz
-			listAll: false // Do you want to list all actions loaded? Set false in prod plz
-		},
-		response: {
-			log: false, // Do you want to see the response log? Set false in prod plz
-		}
-	},
+        json: true, // Do you want the event.body to be parsed? By default, it's a string
+        service: {
+            log: false, // Do you want all logs of the the lib? Set false in prod plz
+            listAll: false // Do you want to list all actions loaded? Set false in prod plz
+        },
+        response: {
+            log: false, // Do you want to see the response log? Set false in prod plz
+        }
+    },
     // You got a plugin and you want to trigger it first? 
-	plugins: [
-		(event, context, callback) => {
-			if (event.source === 'serverless-plugin-warmup') {
-				context.callbackWaitsForEmptyEventLoop = false;
-				callback(null, { message: "Just warm" });
-				return true;
-			}
-		}
-	],
+    plugins: [
+        (event, context, callback) => {
+            if (event.source === 'serverless-plugin-warmup') {
+                context.callbackWaitsForEmptyEventLoop = false;
+                callback(null, {
+                    message: "Just warm"
+                });
+                return true;
+            }
+        }
+    ],
     // Every global moleculer middlewares are loaded here
-	middlewares: [
-		require("./services/someMiddlware")
-	],
-	lambdas: {
+    middlewares: [
+        require("./services/someMiddlware")
+    ],
+    services: [
+        "services/global/health-to-sqs.js",
+        require("./services/global/ping"),
+    ],
+    lambdas: {
         // Mandatory, we use it you create your function reference base on the "handler: handler.HelloWorld" line
-		"HelloWorld": {
-			/*
-				0.0.1 only support a "services" field by lambda and not globally
-				I will add more options for that
-			*/
+        "HelloWorld": {
             services: [
-				/*
-					0.0.1 only support path right now, but I will add more options to load services
-				*/
-                "./services/math.service.js",
+                "services/math.service.js",
+                require("./services/allo.service"),
             ],
             // Mandatory, we use the process.env.AWS_LAMBDA_FUNCTION_NAME to load quickly your lambda !!
-			name: "serverless-moleculer-hello-world",
+            name: "serverless-moleculer-hello-world",
             // Optional : action or handler(ctx) -> NOT BOTH
-			action: "service.someAction",
+            action: "service.someAction",
             // OR
             handler(ctx) {
                 this.logger.info("Hello World");
                 return "Response for the body";
             }
-		},
+        },
     }
 })
+
 ```
 

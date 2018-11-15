@@ -46,16 +46,34 @@ const Moleculer = (gateway, lambda) => {
 
 	const broker = new ServiceBroker(brokerParams);
 
+	const loadServicesFromArray = (array) => {
+		array.forEach(s => {
+			/*
+				@description: we need to check if it's :
+				- a string : load it from __dirname
+				- an object (already a service)
+			*/
+			if (typeof s != "string") {
+				broker.createService(s);
+			} else {
+				broker.createService(
+					require(process.cwd()+"/"+s)
+				);
+			}
+			if (has(gateway, "settings.service.log") && gateway.settings.service.log) {
+				console.log(`𝛌 - '${s}' is created`);
+			}
+		})
+	}
+
+	/*
+		@description: global services first
+	*/
 	if (gateway.services) {
 		if (typeof gateway.services == "function") {
 			gateway.services = gateway.services();
 		}
-		gateway.services.forEach(s => {
-			broker.createService(require(s));
-			if (has(gateway, "settings.service.log") && gateway.settings.service.log) {
-				console.log(`𝛌 - global - '${s}' is created`);
-			}
-		});
+		loadServicesFromArray(gateway.services);
 	}
 
 	/*
@@ -65,12 +83,7 @@ const Moleculer = (gateway, lambda) => {
 		if (typeof lambda.services == "function") {
 			lambda.services = lambda.services();
 		}
-		lambda.services.forEach(s => {
-			broker.createService(require(s));
-			if (has(gateway, "settings.service.log") && gateway.settings.service.log) {
-				console.log(`𝛌 - '${s}' is created`);
-			}
-		});
+		loadServicesFromArray(lambda.services);
 	}
 
 	if (has(gateway, "settings.service.listAll") && gateway.settings.service.listAll) {
