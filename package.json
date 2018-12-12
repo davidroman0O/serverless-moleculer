@@ -1,6 +1,6 @@
 {
   "name": "serverless-moleculer",
-  "version": "0.0.3",
+  "version": "0.0.6",
   "description": "Serverless Framework handler for Moleculer",
   "main": "index.js",
   "scripts": {

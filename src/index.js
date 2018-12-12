@@ -54,14 +54,21 @@ const Moleculer = (gateway, lambda) => {
 				- an object (already a service)
 			*/
 			if (typeof s != "string") {
-				broker.createService(s);
+				/*
+					@description: Because, you probably want to have dynamic services
+				*/
+				if (typeof s == "function") {
+					broker.createService(s());
+				} else {
+					broker.createService(s);
+				}
 			} else {
 				broker.createService(
 					require(process.cwd()+"/"+s)
 				);
 			}
 			if (has(gateway, "settings.service.log") && gateway.settings.service.log) {
-				console.log(`𝛌 - '${s}' is created`);
+				// console.log(`𝛌 - '${s}' is created`);
 			}
 		})
 	}
@@ -89,7 +96,7 @@ const Moleculer = (gateway, lambda) => {
 	if (has(gateway, "settings.service.listAll") && gateway.settings.service.listAll) {
 		broker.services.forEach(s => {
 			Object.keys(s.actions).forEach(a => {
-				console.log(`𝛌 - ${s.fullName}.${a} is registred`);
+				// console.log(`𝛌 - ${s.fullName}.${a} is registred`);
 			});
 		});
 	}
@@ -97,11 +104,17 @@ const Moleculer = (gateway, lambda) => {
 	return broker;
 }
 
+
 module.exports = function(gateway) {
 	try {
 		if (has(gateway, "settings.service.executionTime") && gateway.settings.service.executionTime) {
 			console.time("Execution");
 		}
+
+		// Object.keys(process.env).forEach(key => {
+			// console.log(`${key} == ${process.env[key]}`);
+		// })
+
 
 		const formatResponse = (code, headers, body) => {
 			let localHeaders = {
@@ -114,7 +127,7 @@ module.exports = function(gateway) {
 				});
 			}
 			if (has(gateway, "settings.response.log") && gateway.settings.response.log) {
-				console.log(`𝛌 - response : `, code, headers, body);
+				// console.log(`𝛌 - response : `, code, headers, body);
 			}
 			return {
 				headers: localHeaders,
@@ -154,100 +167,115 @@ module.exports = function(gateway) {
 				}
 			);
 		};
-		// console.log("𝛌 - Welcome to 𝛌", process.env.AWS_LAMBDA_FUNCTION_NAME);
-		// console.log("𝛌 - ", gateway);
-		/*
-			@description: will filter the correct lambda depending of the SLS env var
-		*/
-		const lambda = Object.keys(gateway.lambdas).map(o => {
-			if (gateway.lambdas[o].name == process.env.AWS_LAMBDA_FUNCTION_NAME) {
-				gateway.lambdas[o].rawName = o;
-				return gateway.lambdas[o];
-			}
-			return undefined;
-		}).filter(Boolean)[0];
 
-		// console.log("𝛌 - SLS call ", lambda);
 
-		let handler = {};
 
-		handler[lambda.rawName] = (event, context, callback) => {
-			/*
-				@description: parse into json
-			*/
-			if (has(gateway, "settings.json") && gateway.settings.json) {
-				if (typeof event.body == "string") {
-					event.body = JSON.parse(event.body);
-				}
-			}
-
-			let interrupt = false;
-			if (has(gateway, "plugins")) {
-				gateway.plugins.forEach(plugin => {
-					if (typeof plugin == "function") {
-						interrupt = plugin(event, context, callback);
+		const createHandler = (gateway, lambda) => {
+			return (event, context, callback) => {
+				/*
+					@description: parse into json
+				*/
+				if (has(gateway, "settings.json") && gateway.settings.json) {
+					if (typeof event.body == "string") {
+						event.body = JSON.parse(event.body);
 					}
+				}
+
+				let interrupt = false;
+				if (has(gateway, "plugins")) {
+					gateway.plugins.forEach(plugin => {
+						if (typeof plugin == "function") {
+							interrupt = plugin(event, context, callback);
+						}
+					});
+				}
+
+				if (interrupt) {
+					return;
+				}
+
+				const broker = Moleculer(gateway, lambda);
+
+				let params = {
+					event: event,
+					context: context
+				};
+
+				let brokerPromise = Promise.resolve();
+
+				if (lambda.action && !lambda.handler) {
+					/*
+						@description: this action will recieve the
+					*/
+					brokerPromise = () => broker.call(lambda.action, params);
+				} else if (!lambda.action && lambda.handler) {
+					/*
+						@description: will handle the handler
+					*/
+					lambda.handler = lambda.handler.bind(broker);
+					brokerPromise = () => lambda.handler(Object.assign(broker, { params: params }));
+				} else {
+					throw new Error("You have neither handler or action to handle");
+				}
+
+				broker.start()
+				.then(brokerPromise)
+				.then((response) => {
+					if (!response) {
+						throw new Error("Please return something from your lambda");
+					}
+					return broker.stop()
+					.then(() => {
+						if (has(gateway, "settings.service.executionTime") && gateway.settings.service.executionTime) {
+							try {
+								console.timeEnd("Execution");
+							} catch(e) {
+								// console.log("𝛌 - Can't get execution time but that's ok");
+							}
+						}
+						callback(null, formatSuccess(response));
+					})
+				})
+				.catch((error) => {
+					return broker.stop()
+					.then(() => {
+						if (has(gateway, "settings.service.executionTime") && gateway.settings.service.executionTime) {
+							try {
+								console.timeEnd("Execution");
+							} catch(e) {
+								// console.log("𝛌 - Can't get execution time but that's ok");
+							}
+						}
+						callback(null, formatError(error));
+					})
 				});
 			}
+		};
 
-			if (interrupt) {
-				return;
-			}
+		/*
+			@description: special case to handle local development
+		*/
+		let handler = {};
 
-			const broker = Moleculer(gateway, lambda);
+		// console.log("𝛌 - Welcome to 𝛌", process.env.AWS_LAMBDA_FUNCTION_NAME);
+		// console.log("𝛌 - ", gateway);
 
-			let params = {
-				event: event,
-				context: context
-			};
-
-			let brokerPromise = Promise.resolve();
-
-			if (lambda.action && !lambda.handler) {
-				/*
-					@description: this action will recieve the
-				*/
-				brokerPromise = () => broker.call(lambda.action, params);
-			} else if (!lambda.action && lambda.handler) {
-				/*
-					@description: will handle the handler
-				*/
-				lambda.handler = lambda.handler.bind(broker);
-				brokerPromise = () => lambda.handler(Object.assign(broker, { params: params }));
-			} else {
-				throw new Error("You have neither handler or action to handle");
-			}
-
-			broker.start()
-			.then(brokerPromise)
-			.then((response) => {
-				if (!response) {
-					throw new Error("Please return something from your lambda");
+		if (!process.env.IS_OFFLINE) {
+			/*
+				@description: will filter the correct lambda depending of the SLS env var
+			*/
+			const lambda = Object.keys(gateway.lambdas).map(o => {
+				if (gateway.lambdas[o].name == process.env.AWS_LAMBDA_FUNCTION_NAME) {
+					gateway.lambdas[o].rawName = o;
+					return gateway.lambdas[o];
 				}
-				return broker.stop()
-				.then(() => {
-					if (has(gateway, "settings.service.executionTime") && gateway.settings.service.executionTime) {
-						try {
-							console.timeEnd("Execution");
-						} catch(e) {
-							console.log("𝛌 - Can't get execution time but that's ok");
-						}
-					}
-					callback(null, formatSuccess(response));
-				})
-			})
-			.catch((error) => {
-				return broker.stop()
-				.then(() => {
-					if (has(gateway, "settings.service.executionTime") && gateway.settings.service.executionTime) {
-						try {
-							console.timeEnd("Execution");
-						} catch(e) {
-							console.log("𝛌 - Can't get execution time but that's ok");
-						}
-					}
-					callback(null, formatError(error));
-				})
+				return undefined;
+			}).filter(Boolean)[0];
+			// console.log("𝛌 - SLS call ", lambda);
+			handler[lambda.rawName] = createHandler(gateway, lambda);
+		} else {
+			Object.keys(gateway.lambdas).forEach(funct => {
+				handler[funct] = createHandler(gateway, gateway.lambdas[funct]);
 			});
 		}
 
